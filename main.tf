@@ -6,6 +6,12 @@ variable "region" {
     default = "us-west2"
 }
 
+variable "project_id" {
+    type = string
+    default = ""
+    description = "Project ID"
+}
+
 variable "instance_name" {
     type = string
     description = "Name of the Instance"
