@@ -2,42 +2,20 @@
 
 variable "region" {
     type = string
-    description = "AWS region to deploy in"
-    default = "us-west-2"
+    description = "GCP region to deploy in"
+    default = "us-west2"
 }
 
 variable "instance_name" {
     type = string
     description = "Name of the Instance"
-    default = "Whisper-Demo_ec2"
+    default = "gcp-test-webapp_vm"
 }
 
 variable "instance_type" {
     type = string
-    description = "Type of Ec2 Instance"
-    default = "t2.micro"
-}
-
-variable "autoscaling_capacity" {
-    type = number
-    description = "Desired capacity of auto scaling group"
-    default = 1
-}
-
-data "aws_ami" "ubuntu" {
-  most_recent = true
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-
-  owners = ["099720109477"] # Canonical
+    description = "Type of VM Instance"
+    default = "f1-micro"
 }
 
 variable "instance_state" {
@@ -55,86 +33,47 @@ variable "env_file_content" {
 
 terraform {
   required_providers {
-    aws = {
-      source  = "hashicorp/aws"
+    google = {
+      source  = "hashicorp/google"
       version = "~> 4.0"
     }
   }
 }
 
-# Configure the AWS Provider
-provider "aws" {
-  # TODO: Update your region
+
+provider "google" {
   region = var.region
+  project = var.project_id
 }
 
 
-resource "aws_security_group" "ingress-all-test" {
-  name   = "allow-all-sg-${var.instance_name}"
-
-  ingress {
-    cidr_blocks = [
-      "0.0.0.0/0"
-    ]
-    from_port = 22
-    to_port   = 22
-    protocol  = "tcp"
-  }
-
-  ingress {
-    cidr_blocks = [
-      "0.0.0.0/0"
-    ]
-    from_port = 80
-    to_port   = 80
-    protocol  = "tcp"
-  }
-
-  ingress {
-    cidr_blocks = [
-      "0.0.0.0/0"
-    ]
-    from_port = 443
-    to_port   = 443
-    protocol  = "tcp"
-  }
-
-  ingress {
-    cidr_blocks = [
-      "0.0.0.0/0"
-    ]
-    from_port = 3000
-    to_port   = 3000
-    protocol  = "tcp"
-  }
-
-
-  // Terraform removes the default rule
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  tags = {
-    Name = "security_group_${var.instance_name}"
-  }
+resource "google_project_service" "compute_service" {
+  project = var.project_id
+  service = "compute.googleapis.com"
 }
 
-resource "aws_instance" "web" {
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.instance_type
 
-  vpc_security_group_ids = ["${aws_security_group.ingress-all-test.id}"]
-  tags = {
-    Name = var.instance_name
+resource "google_compute_instance" "default" {
+  name         = var.instance_name
+  machine_type = var.instance_type
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-11"  
+    }
   }
-  associate_public_ip_address = true
 
+  network_interface {
+    network = "default"
 
-  # subnet_id = "${aws_subnet.subnet-uno.id}"
+    access_config {
+      // Ephemeral public IP
+    }
+  }
 
-  user_data = <<EOF
+  tags = ["vm_${var.instance_name}"]  
+  
+  metadata_startup_script = <<EOF
 #!/bin/bash
 sudo apt-get update -y
 sudo apt-get upgrade -y
@@ -156,14 +95,18 @@ sudo docker-compose -f docker-compose.yml build
 sudo docker-compose -f docker-compose.yml up -d
 
   EOF
-
 }
 
-resource "aws_eip" "custom_eip" {
-  instance = aws_instance.web.id
-}
+resource "google_compute_firewall" "default" {
+  name    = "allow-all-${var.instance_name}"
+  network = "default"
+  
+  allow {
+    protocol = "tcp"
+    ports    = ["22", "80", "443", "3000"]
+  }
 
-resource "aws_ec2_instance_state" "web" {
-  instance_id = aws_instance.web.id
-  state = var.instance_state
-}
+  source_ranges = ["0.0.0.0/0"]  
+  target_tags   = ["vm_${var.instance_name}"] 
+} 
+
